@@ -35,7 +35,7 @@ int Batt_read = 0;
 float Batt_volt = 0;
 
 // Define time period to update time, 1x per day
-#define WRITE_DATA_MILLIS (30 * 60 * 1000) //needs to be same as sleep interval
+#define WRITE_DATA_MILLIS (60 * 60 * 1000) //needs to be same as sleep interval
 #define ONE_DAY_MILLIS (24 * 60 * 60 * 1000) //every day
 
 unsigned long lastSync = millis();
@@ -102,7 +102,7 @@ void loop() {
     }
 
     // Sync time 1x per day
-    if(millis() - lastSync > ONE_DAY_MILLIS) {
+    /*if(millis() - lastSync > ONE_DAY_MILLIS) {
 
       if(Particle.connected() == false) {
           Particle.connect();
@@ -116,7 +116,7 @@ void loop() {
       //Log.info( "voltage=%.2f", fuel.getVCell() ); // log battery voltage, redundent
       lastSync = millis();//reset the lastsync
       
-    }
+    }*/
     
 
 }

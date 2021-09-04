@@ -8,5 +8,5 @@
     },
     "particle.targetPlatform": "boron",
     "particle.firmwareVersion": "3.0.0",
-    "particle.targetDevice": "Apollo_2"
+    "particle.targetDevice": "Apollo_4"
 }

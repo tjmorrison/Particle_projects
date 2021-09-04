@@ -6,6 +6,6 @@
         "*.ino": "cpp"
     },
     "particle.targetPlatform": "boron",
-    "particle.targetDevice": "Appollo_1",
+    "particle.targetDevice": "Apollo_4",
     "particle.firmwareVersion": "3.0.0"
 }

@@ -3,7 +3,7 @@
 /******************************************************/
 
 #include "Particle.h"
-#line 1 "c:/Users/tjmor/OneDrive/Documents/Particle_projects/PIR_BCA_V1/PIR_BCA_V1/src/PIR_BCA_V1.ino"
+#line 1 "c:/Users/tjmor/OneDrive/Documents/Code/Particle_projects/PIR_BCA/PIR_BCA_V1/src/PIR_BCA_V1.ino"
 /*
  * Project Dist_Radar_V3
  * Description: This code is testing the RCWL 05516 distance Radar with interuptts the
@@ -14,13 +14,10 @@
  * Project to Do:
  * Prioity:
  * Add sleep interupt if battery falls below threshold- may not be nessecary with charge controller
- * backup data protection?
- * prototype enclosure 
  * 
  * Secondary
- * DI/O protection circuit
- * Write every hour on the hour
- * Set clock 1x every day
+ * Write every hour on the hour?
+ * Set clock 1x every day ~ don't need to, google handles this
  * 
  * Wiring
  * RCWL-0516, delay is 5 sec <1mA, range 4 m, 360 deg field of view, can see through acrylic 
@@ -35,7 +32,7 @@
 //Define I/O pins used
 void setup();
 void loop();
-#line 30 "c:/Users/tjmor/OneDrive/Documents/Particle_projects/PIR_BCA_V1/PIR_BCA_V1/src/PIR_BCA_V1.ino"
+#line 27 "c:/Users/tjmor/OneDrive/Documents/Code/Particle_projects/PIR_BCA/PIR_BCA_V1/src/PIR_BCA_V1.ino"
 const pin_t Pin_PIR = D2;
 const pin_t Pin_Beacon = D3;
 const pin_t Pin_Battery =  A3;
@@ -47,7 +44,7 @@ int Batt_read = 0;
 float Batt_volt = 0;
 
 // Define time period to update time, 1x per day
-#define WRITE_DATA_MILLIS (30 * 60 * 1000) //needs to be same as sleep interval
+#define WRITE_DATA_MILLIS (60 * 60 * 1000) //needs to be same as sleep interval
 #define ONE_DAY_MILLIS (24 * 60 * 60 * 1000) //every day
 
 unsigned long lastSync = millis();
@@ -114,7 +111,7 @@ void loop() {
     }
 
     // Sync time 1x per day
-    if(millis() - lastSync > ONE_DAY_MILLIS) {
+    /*if(millis() - lastSync > ONE_DAY_MILLIS) {
 
       if(Particle.connected() == false) {
           Particle.connect();
@@ -128,7 +125,7 @@ void loop() {
       //Log.info( "voltage=%.2f", fuel.getVCell() ); // log battery voltage, redundent
       lastSync = millis();//reset the lastsync
       
-    }
+    }*/
     
 
 }
