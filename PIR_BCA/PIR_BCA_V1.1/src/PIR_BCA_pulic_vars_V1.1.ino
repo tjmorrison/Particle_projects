@@ -1,89 +1,94 @@
 /*
- * Project: PIR/Radar & Beacon Detection System
- * Description: Trail head monitoring system using PIR motion sensor and 
- *              beacon detection on D3. Publishes detection counts and battery voltage 
- *              to Google Sheets via Particle webhook. Sends acknowledgment pulse on D4
- *              when beacon is detected.
- * 
+ * Project Dist_Radar_V3
+ * Description: This code is testing the RCWL 05516 distance Radar with interuptts the
+ *  particle board for trail head detection system. 
  * Author: Travis Morrison
- * Date: May 25, 2021 (Original)
- *       February 2, 2026 (Updated - Added D4 beacon acknowledgment pulse)
- * 
- * Hardware:
- * - PIR motion sensor connected to D2
- * 
- * Wiring:
- * - PIR: VIN (3V3 or VUSB), OUT (D2), GND
- * - Beacon Input: D3
- * - Beacon Acknowledgment Output: D4 (3.3V pulse when beacon detected)
- * - Battery Monitor: A3 (with 5:1 voltage divider)
- * 
- * Project To Do:
- * Priority:
- * - Add sleep interrupt if battery falls below threshold
- * 
- * Secondary:
- * - Optimize hourly write timing
+ * Date: May 25 2021 
+
  */
 
 //======================================================================================================
 //Define I/O pins used
 const pin_t Pin_PIR = D2;
 const pin_t Pin_Beacon = D3;
-const pin_t Pin_Beacon_Ack = D4;  // NEW: Acknowledgment pulse output
-const pin_t Pin_Battery = A3;
+const pin_t Pin_Battery =  A3;
 
 //Define global variables 
-int PIR_cnt = 0; //PIR counter
-int Beacon_cnt = 0; //Beacon counter
+int PIR_cnt = 0; //PIR counter and so forth
+int Beacon_cnt = 0; //BCA pin counter and so forth
 int Batt_read = 0;
-float Batt_volt = 0;
+double Batt_volt = 0;  // Changed from float to double
 
-// Define time period to update, 1 hour
+// Monitoring variables
+int signal_strength = 0;
+int signal_quality = 0;
+int wake_reason = 0; // 0=timer, 1=PIR, 2=Beacon, 3=both sensors
+retained unsigned long last_publish_time = 0;
+
+// Define time period to update time, 1x per day
 #define WRITE_DATA_MILLIS (60 * 60 * 1000) //needs to be same as sleep interval
 //#define ONE_DAY_MILLIS (24 * 60 * 60 * 1000) //every day
 
 unsigned long lastSync = millis();
 unsigned long lastWrite = millis();
 
-SYSTEM_THREAD(ENABLED); //allows the code to run before connecting to the cloud and will run without cloud connection
-SerialLogHandler logHandler;
+SYSTEM_THREAD(ENABLED); //allows the code to run before connecting to the cloud and will run without cloud conncetion
+SerialLogHandler logHandler; //
 SystemSleepConfiguration config;
 FuelGauge fuel; //defines the fuel gauge class
 
 // The event name to publish with has to be same as webhook
 const char *eventName = "sheetTest1";
 
-//Declaration of functions
+//Decleration of functions~ tells the compiler which functions are available and how to use them
 void PublishToGoogleSheet();
-void SendBeaconAck();  // NEW: Send acknowledgment pulse
 
 // setup() runs once, when the device is first turned on.
 void setup() {
 
-  //Set the digital pins to input/output
+  //Set the digital pins to input
+  //note that analog pins don't need analog read
   pinMode(Pin_PIR, INPUT);
   pinMode(Pin_Beacon, INPUT);
-  pinMode(Pin_Beacon_Ack, OUTPUT);  // NEW: Set D4 as output
-  digitalWrite(Pin_Beacon_Ack, LOW); // NEW: Initialize to LOW
+
+  // Expose variables to Particle Console
+  Particle.variable("PIR_count", PIR_cnt);
+  Particle.variable("Beacon_count", Beacon_cnt);
+  Particle.variable("Battery_V", Batt_volt);
+  Particle.variable("Signal_Str", signal_strength);
+  Particle.variable("Signal_Qual", signal_quality);
+  Particle.variable("Wake_Reason", wake_reason);
+  Particle.variable("Last_Publish", last_publish_time);
 
 }
 
 // main loop for code, runs continuously
 void loop() {
-    //make sure we're connected before sleep
+    //make sure where connected before sleep~don't think I need that
     
     // Sleep command until one of the signals gets a signal
     config.mode(SystemSleepMode::ULTRA_LOW_POWER).flag(SystemSleepFlag::WAIT_CLOUD).duration(WRITE_DATA_MILLIS).gpio(Pin_PIR, RISING).gpio(Pin_Beacon, RISING); 
     //config.mode(SystemSleepMode::STOP).network(NETWORK_INTERFACE_CELLULAR).flag(SystemSleepFlag::WAIT_CLOUD).duration(WRITE_DATA_MILLIS).gpio(Pin_PIR, RISING).gpio(Pin_Beacon, RISING); 
     System.sleep(config);
 
-    if (digitalRead(Pin_PIR) == HIGH){
+    if (digitalRead(Pin_PIR)== HIGH){
       PIR_cnt = PIR_cnt + 1;
     }
-    if (digitalRead(Pin_Beacon) == HIGH){
+    if (digitalRead(Pin_Beacon)== HIGH){
       Beacon_cnt = Beacon_cnt + 1;
-      SendBeaconAck();  // NEW: Send acknowledgment pulse when beacon detected
+    }
+
+    // Determine wake reason and update counters
+    wake_reason = 0;
+    bool pir_triggered = digitalRead(Pin_PIR) == HIGH;
+    bool beacon_triggered = digitalRead(Pin_Beacon) == HIGH;
+    
+    if (pir_triggered && beacon_triggered) {
+      wake_reason = 3;
+    } else if (pir_triggered) {
+      wake_reason = 1;
+    } else if (beacon_triggered) {
+      wake_reason = 2;
     }
 
     //write to google sheets every time it wakes up from sleep routine and since last write is greater than write interval
@@ -96,6 +101,10 @@ void loop() {
         Batt_read = analogRead(Pin_Battery);
         Batt_volt = (Batt_read*3.3/4095.0)*5.0; //multiply by 3.3/4095 to convert to voltage, mult. by 5 bc of 5 to 1 voltage divider
         
+        // Get signal strength
+        CellularSignal sig = Cellular.RSSI();
+        signal_strength = sig.getStrength();
+        signal_quality = sig.getQuality();
        
         // Calls Publish to Google sheet function
         PublishToGoogleSheet();
@@ -120,7 +129,7 @@ void loop() {
       //Particle.syncTime(); // sync time
       //waitUntil(Particle.syncTimeDone);
       Particle.publishVitals(); // publish vitals 1x day
-      //Log.info( "voltage=%.2f", fuel.getVCell() ); // log battery voltage, redundant
+      //Log.info( "voltage=%.2f", fuel.getVCell() ); // log battery voltage, redundent
       lastSync = millis();//reset the lastsync
       
     }*/
@@ -133,14 +142,10 @@ void loop() {
 void PublishToGoogleSheet() {
     char buf[128];
     snprintf(buf, sizeof(buf),"[%d,%d,%.2f]", PIR_cnt, Beacon_cnt, Batt_volt);
-    Particle.publish(eventName, buf, PRIVATE);
-    Log.info("published: %s", buf);
-}
-
-// NEW: Send acknowledgment pulse on D4 when beacon is detected
-void SendBeaconAck() {
-    digitalWrite(Pin_Beacon_Ack, HIGH);  // Set D4 HIGH (3.3V)
-    delay(100);                           // 100ms pulse duration
-    digitalWrite(Pin_Beacon_Ack, LOW);   // Set D4 back to LOW
-    Log.info("Beacon acknowledgment pulse sent on D4");
+    if (Particle.publish(eventName, buf, PRIVATE)) {
+        last_publish_time = Time.now();
+        Log.info("published: %s", buf);
+    } else {
+        Log.error("publish failed");
+    }
 }
