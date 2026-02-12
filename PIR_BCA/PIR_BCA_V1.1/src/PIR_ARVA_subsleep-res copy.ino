@@ -1,8 +1,8 @@
 /*
  * Project: PIR/Radar & Beacon Detection System
- * Description: Trail head monitoring system using PIR motion sensor and 
- *              beacon detection on D3. Logs detection data every 5 minutes, publishes 
- *              when connected (typically hourly). Retains data if connection fails.
+ * Description: Trail head monitoring system using PIR motion sensor and
+ *              beacon detection on A4 (analog input). Logs detection data every 15 minutes,
+ *              publishes when connected (typically hourly). Retains data if connection fails.
  *              Sends acknowledgment pulse on D4 when beacon is detected.
  * 
  * Author: Travis Morrison
@@ -14,7 +14,7 @@
  * 
  * Wiring:
  * - PIR: VIN (3V3 or VUSB), OUT (D2), GND
- * - Beacon Input: D3 (3.3V pulse when beacon detected)
+ * - Beacon Input: A4 (analog input, high signal when beacon detected)
  * - Beacon Acknowledgment Output: D4 (3.3V pulse when beacon detected)
  * - Battery Monitor: A3 (with 5:1 voltage divider)
  * 
@@ -26,29 +26,34 @@
 
 //======================================================================================================
 // At the very top, after #define statements
-#define DEBUG_MODE false  // Set to false for deployment
+#define DEBUG_MODE true  // Set to false for deployment
 
 //Define I/O pins used
 const pin_t Pin_PIR = D2;
-const pin_t Pin_Beacon = D3;
+const pin_t Pin_Beacon = A4;
 const pin_t Pin_Beacon_Ack = D4;  // Acknowledgment pulse output
 const pin_t Pin_Battery = A3;
 
-//Define time intervals
-#define SLEEP_INTERVAL_MILLIS (5 * 60 * 1000)  // 5 minutes
-#define MAX_INTERVALS 36  // Store up to 3 hours of data (36 x 5min)
-#define TARGET_INTERVALS 12  // Try to publish every hour (12 x 5min)
+// Analog threshold for beacon detection (12-bit ADC: 0-4095)
+// ~2048 corresponds to ~1.65V (half of 3.3V reference)
+#define BEACON_ANALOG_THRESHOLD 2048
 
-//Define global variables 
+//Define time intervals
+#define COLLECTION_INTERVAL_MILLIS (15 * 60 * 1000)  // 15 minutes - data collection interval
+#define MAX_INTERVALS 12  // Store up to 3 hours of data (12 x 15min)
+#define TARGET_INTERVALS 4  // Try to publish every hour (4 x 15min)
+
+//Define global variables
 int PIR_cnt = 0; //PIR counter for current interval
 int Beacon_cnt = 0; //Beacon counter for current interval
+unsigned long intervalStartTime = 0; // Track when current collection interval started
 
 // Arrays to store data - sized for 3 hours to handle connection issues
 int PIR_intervals[MAX_INTERVALS];
 int Beacon_intervals[MAX_INTERVALS];
 String interval_timestamps[MAX_INTERVALS];
 
-int current_interval = 0;  // Track which interval we're on (0-35)
+int current_interval = 0;  // Track which interval we're on (0-11)
 
 int Batt_read = 0;
 float Batt_volt = 0;
@@ -77,7 +82,7 @@ void setup() {
 
   //Set the digital pins to input/output
   pinMode(Pin_PIR, INPUT);
-  pinMode(Pin_Beacon, INPUT);
+  pinMode(Pin_Beacon, INPUT);  // Analog pin, INPUT mode for analogRead
   pinMode(Pin_Beacon_Ack, OUTPUT);
   digitalWrite(Pin_Beacon_Ack, LOW); // Initialize to LOW
   
@@ -87,55 +92,72 @@ void setup() {
   // Initialize interval arrays
   InitializeIntervals();
 
+  // Initialize interval start time
+  intervalStartTime = millis();
+
 }
 
 
 
 // Then in loop(), wrap the sleep command:
 void loop() {
-    
+
     #if !DEBUG_MODE  // Only sleep if NOT in debug mode
-    // Sleep for 5 minutes or until wake on PIR/Beacon
+    // Sleep until 15-min interval ends OR wake on PIR trigger
+    // PIR GPIO trigger wakes the device; beacon (analog A4) is polled each wake cycle
+    unsigned long remainingTime = 0;
+    unsigned long elapsed = millis() - intervalStartTime;
+    if (elapsed < COLLECTION_INTERVAL_MILLIS) {
+      remainingTime = COLLECTION_INTERVAL_MILLIS - elapsed;
+    }
+
     config.mode(SystemSleepMode::ULTRA_LOW_POWER)
           .flag(SystemSleepFlag::WAIT_CLOUD)
-          .duration(SLEEP_INTERVAL_MILLIS)
-          .gpio(Pin_PIR, RISING)
-          .gpio(Pin_Beacon, RISING); 
+          .duration(remainingTime)
+          .gpio(Pin_PIR, RISING);
+    // Note: Beacon on A4 (analog) cannot use GPIO wake - polled on each wake cycle
     System.sleep(config);
     #else
     delay(5000);  // Just delay 5 seconds instead of sleeping
     #endif
-    // Check for detections
+
+    // Check for detections - PIR via GPIO wake, beacon via analog read
     if (digitalRead(Pin_PIR) == HIGH){
       PIR_cnt = PIR_cnt + 1;
-      Log.info("PIR detected, count: %d", PIR_cnt);
+      Log.info("PIR detected, count for interval: %d", PIR_cnt);
     }
-    if (digitalRead(Pin_Beacon) == HIGH){
+    int beaconAnalogVal = analogRead(Pin_Beacon);
+    if (beaconAnalogVal >= BEACON_ANALOG_THRESHOLD){
       Beacon_cnt = Beacon_cnt + 1;
       SendBeaconAck();
-      Log.info("Beacon detected, count: %d", Beacon_cnt);
+      Log.info("Beacon detected (analog: %d), count for interval: %d", beaconAnalogVal, Beacon_cnt);
     }
 
-    // Store data for this 5-minute interval (if we have space)
-    if (current_interval < MAX_INTERVALS) {
-      PIR_intervals[current_interval] = PIR_cnt;
-      Beacon_intervals[current_interval] = Beacon_cnt;
-      interval_timestamps[current_interval] = Time.format(Time.now(), "%Y-%m-%d %H:%M:%S");
-      
-      Log.info("Interval %d: PIR=%d, Beacon=%d at %s", 
-               current_interval, PIR_cnt, Beacon_cnt, 
-               interval_timestamps[current_interval].c_str());
-      
-      // Move to next interval
-      current_interval++;
-    } else {
-      Log.warn("Max intervals reached! Data buffer full, attempting publish...");
+    // Check if the 15-minute collection interval has elapsed
+    if (millis() - intervalStartTime >= COLLECTION_INTERVAL_MILLIS) {
+
+      // Store data for this 15-minute interval (if we have space)
+      if (current_interval < MAX_INTERVALS) {
+        PIR_intervals[current_interval] = PIR_cnt;
+        Beacon_intervals[current_interval] = Beacon_cnt;
+        interval_timestamps[current_interval] = Time.format(Time.now(), "%Y-%m-%d %H:%M:%S");
+
+        Log.info("Interval %d complete: PIR=%d, Beacon=%d at %s",
+                 current_interval, PIR_cnt, Beacon_cnt,
+                 interval_timestamps[current_interval].c_str());
+
+        // Move to next interval
+        current_interval++;
+      } else {
+        Log.warn("Max intervals reached! Data buffer full, attempting publish...");
+      }
+
+      // Reset counters for next interval
+      PIR_cnt = 0;
+      Beacon_cnt = 0;
+      intervalStartTime = millis();
     }
-    
-    // Reset counters for next interval
-    PIR_cnt = 0;
-    Beacon_cnt = 0;
-    
+
     // Attempt to publish if we've reached target intervals OR if buffer is full
     if (current_interval >= TARGET_INTERVALS) {
       
